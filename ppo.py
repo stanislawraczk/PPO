@@ -48,9 +48,9 @@ class Agent:
             mu = self.actor_network(state)
         dist = torch.distributions.Normal(mu, self.std)
         action = dist.sample()
-        log_prob = dist.log_prob(action)
+        log_prob = torch.sum(dist.log_prob(action))
         action = action.cpu().data.numpy()
-        log_prob = log_prob.cpu().data.numpy()
+        log_prob = log_prob.cpu().data
         return action, log_prob
 
     def evaluate(self, state):
@@ -71,7 +71,7 @@ class Agent:
         expected_values = self.critic_network(states).squeeze()
         dists = torch.distributions.Normal(mus, self.std)
 
-        curr_log_probs = dists.log_prob(actions)
+        curr_log_probs = torch.sum(dists.log_prob(actions), dim=1)
 
         entropy_loss = dists.entropy().mean()
 
