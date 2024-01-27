@@ -4,7 +4,6 @@ from collections import deque
 from time import time
 
 import torch
-from torch import FloatTensor
 from torch.nn import functional as F
 from torch import optim
 import numpy as np
@@ -14,8 +13,10 @@ from model_ppo import ActorPPO, CriticPPO
 
 from global_variables import *
 
-# device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-device = torch.device("cpu")
+if CUDA:
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+else:
+    device = torch.device("cpu")
 
 
 class Agent:
@@ -37,16 +38,22 @@ class Agent:
         )
 
         self.entropy_coef = torch.tensor(ENTROPY_COEF).float().to(device)
-        self.std = SD
 
         self.logger = logger
 
     def act(self, state):
         state = torch.from_numpy(state).float().to(device)
         with torch.no_grad():
-            # mu, sigma = self.actor_network(state)
-            mu = self.actor_network(state)
-        dist = torch.distributions.Normal(mu, self.std)
+            mu, logstd = self.actor_network(state)
+            std = torch.exp(logstd)
+            self.logger.log_std(std.cpu().data.numpy())
+        try:
+            dist = torch.distributions.Normal(mu, std)
+        except ValueError as err:
+            print(err)
+            self.logger.save_graphs()
+            self.logger.save_logs('Episode with error')
+            raise ValueError
         action = dist.sample()
         log_prob = torch.sum(dist.log_prob(action))
         action = action.cpu().data.numpy()
@@ -66,10 +73,16 @@ class Agent:
 
         advantages = (advantages - advantages.mean()) / advantages.std()
 
-        # mus, sigmas = self.actor_network(states)
-        mus = self.actor_network(states)
+        mus, logstd = self.actor_network(states)
+        stds = torch.exp(logstd)
         expected_values = self.critic_network(states).squeeze()
-        dists = torch.distributions.Normal(mus, self.std)
+        try:
+            dists = torch.distributions.Normal(mus, stds)
+        except ValueError as err:
+            print(err)
+            self.logger.save_graphs()
+            self.logger.save_logs('Episode with error')
+            raise ValueError
 
         curr_log_probs = torch.sum(dists.log_prob(actions), dim=1)
 
@@ -84,15 +97,16 @@ class Agent:
         actor_loss_clipped = torch.min(
             probability_ratios_clipped * advantages, probability_ratios * advantages
         )
-        # actor_loss_final = -(actor_loss_clipped + self.entropy_coef * entropy_loss).mean()
-        actor_loss_final = -actor_loss_clipped.mean()
+        actor_loss_final = -(actor_loss_clipped + self.entropy_coef * entropy_loss).mean()
 
         self.actor_network_optim.zero_grad()
         actor_loss_final.backward()
+        torch.nn.utils.clip_grad_norm_(self.actor_network.parameters(), .5)
         self.actor_network_optim.step()
 
         self.critic_network_optim.zero_grad()
         value_function_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.critic_network.parameters(), .5)
         self.critic_network_optim.step()
 
         self.logger.log_losses(
@@ -199,13 +213,19 @@ class TrajectoryBuffer:
 
 
 class Logger:
-    def __init__(self, start_time) -> None:
+    def __init__(self, start_time, start_timestamp) -> None:
         self.rewards = []
         self.episode_returns = []
         self.episode_returns_window = deque(maxlen=100)
         self.actor_loss = []
         self.critic_loss = []
+        self.std = []
+        self.loss_logged = 0
+        self.std_logged = 0
+        self.episode_logged = 0
         self.start_time = start_time
+        self.start_timestamp = start_timestamp
+        self.log_file_path = 'logs/log_' + self.start_timestamp + '.txt'
 
     def _log_summary(self, episode_num, stop_time):
         print(f"========== Episode #{episode_num}==========")
@@ -218,18 +238,52 @@ class Logger:
         print(f"Time for last 10 episodes: {round(time_measure, 3)} seconds")
 
         if episode_num % 100 == 0:
-            self._save_graphs(episode_num)
+            self.save_graphs()
+            self.save_logs(episode_num)
 
     def log_rewards(self, rewards, episode_return):
         self.rewards.extend(rewards)
         self.episode_returns.append(episode_return)
         self.episode_returns_window.append(episode_return)
+        self.episode_logged += 1
 
     def log_losses(self, actor_loss, critic_loss):
         self.actor_loss.append(actor_loss)
         self.critic_loss.append(critic_loss)
+        self.loss_logged += 1
 
-    def _save_graphs(self, episode_num):
+    def log_std(self, std):
+        self.std.append(std)
+        self.std_logged += 1
+
+    def save_logs(self, episode_num):
+        episode_returns = [f'{r:.2f}' for r in self.episode_returns[-self.episode_logged:]]
+        insert_new_lines = range(10,self.episode_logged,10)
+        for idx in insert_new_lines:
+            episode_returns.insert(idx, '\n')
+        episode_returns = ', '.join(episode_returns)
+        actor_losses = [str(r) for r in self.actor_loss[-self.loss_logged:]]
+        actor_losses = ', '.join(actor_losses)
+        critic_losses = [str(r) for r in self.critic_loss[-self.loss_logged:]]
+        critic_losses = ', '.join(critic_losses)
+        # log_file_path = 'logs/log_' + self.start_timestamp + '.txt'
+        with open(self.log_file_path, 'a') as f:
+            f.write(f'==========Episode #{episode_num}==========\n')
+            f.write(f'==========Episode Returns==========\n')
+            f.write(episode_returns)
+            f.write('\n')
+            f.write(f'==========Actor Losses==========\n')
+            f.write(actor_losses)
+            f.write('\n')
+            f.write(f'==========Critic Losses==========\n')
+            f.write(critic_losses)
+            f.write('\n')
+
+        self.loss_logged = 0
+        self.std_logged = 0
+        self.episode_logged = 0
+
+    def save_graphs(self):
         moving_average_episode_returns = []
         moving_average_window = 50
         for i in range(len(self.episode_returns) - moving_average_window + 1):
@@ -238,13 +292,22 @@ class Logger:
 
         plt.plot(moving_average_episode_returns)
         plt.title("episode scores")
-        plt.savefig(f"plots/episode_scores_{episode_num}.png")
+        plt.savefig(f"plots/episode_scores/episode_scores.png")
         plt.close()
         plt.plot(self.actor_loss)
         plt.title("actor loss")
-        plt.savefig(f"plots/actor_loss_{episode_num}.png")
+        plt.savefig(f"plots/actor_loss/actor_loss.png")
         plt.close()
         plt.plot(self.critic_loss)
         plt.title("critic loss")
-        plt.savefig(f"plots/critic_loss_{episode_num}.png")
+        plt.savefig(f"plots/critic_loss/critic_loss.png")
         plt.close()
+        plt.plot(self.std)
+        plt.title("std")
+        plt.savefig(f"plots/stds/std.png")
+        plt.close()
+
+    def log_finish(self, finish_time):
+        training_time = self.start_time - finish_time
+        with open(self.log_file_path, 'a') as f:
+            f.write(f'Training time: {training_time} s')
