@@ -3,3 +3,7 @@ videos/
 tests/
 plots/
 checkpoints/
+logs/
+Archive/
+.idea/
+__pycache__/
