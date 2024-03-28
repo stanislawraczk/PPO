@@ -1,0 +1,5 @@
+torch==2.1.0+cu121
+numpy
+pandas
+matplotlib
+gymnasium==0.29.1
