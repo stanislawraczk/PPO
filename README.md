@@ -5,9 +5,7 @@
 
 ### Trained model for walker2d
 
-<video width="320" height="240" controls>
-  <source src="videos_tests\rl-video-episode-0.mp4" type="video/mp4">
-</video>
+https://github.com/stanislawraczk/PPO/assets/40478360/75ad3134-aa35-4a5c-a340-1f08dbcde7f7
 
 ## How to use
 ### To run the code please install required libraries from requirements.txt
