@@ -1,7 +1,7 @@
 # PPO implementaion
 
 ## Purpose
-### This repository a PPO implemantion to be used in my masters thesis. Implemantion is functional and tested on gymnasium enviroments e.g. Walker2d and Pendulum
+### This repository is a PPO implemantion to be used in my masters thesis. Implemantion is tested on gymnasium enviroments e.g. Walker2d and Pendulum
 
 ### Trained model for walker2d
 
