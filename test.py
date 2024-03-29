@@ -11,9 +11,14 @@ from global_variables import *
 
 # env = gym.make('Humanoid-v4', render_mode='human')
 # env = gym.make("BipedalWalker-v3", hardcore=True)
-env = gym.make('Walker2d-v4', render_mode='human')
+env = gym.make('Walker2d-v4', render_mode='rgb_array')
 # env = gym.make('MountainCarContinuous-v0')
 # env = gym.make("Pendulum-v1", render_mode="human")
+env = gym.wrappers.RecordVideo(
+    env,
+    "videos_tests/",
+    episode_trigger=lambda t: t % 100 == 0,
+)
 
 action_size = env.action_space.shape[0]
 state_size = env.observation_space.shape[0]
